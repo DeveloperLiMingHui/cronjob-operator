@@ -106,6 +106,7 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		meta.SetStatusCondition(&cronJob.Status.Conditions, metav1.Condition{
 			Type:    typeProgressingCronJob,
 			Status:  metav1.ConditionUnknown,
+			Reason:  "Reconciling",
 			Message: "Starting reconciliation",
 		})
 		if err := r.Status().Update(ctx, &cronJob); err != nil {
