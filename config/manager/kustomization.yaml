@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: xlmh/cronjob-operator
-  newTag: v0.0.1
+  newTag: v0.0.2
