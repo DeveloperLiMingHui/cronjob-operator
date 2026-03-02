@@ -25,4 +25,4 @@ make run
 
 # kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.4/cert-manager.yaml
 
-make deploy IMG=xlmh/cronjob-operator:v0.0.1
+make deploy IMG=xlmh/cronjob-operator:v0.0.3
