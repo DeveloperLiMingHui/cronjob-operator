@@ -6,6 +6,8 @@ cliVersion: 4.12.0
 domain: tutorial.kubebuilder.io
 layout:
 - go.kubebuilder.io/v4
+plugins:
+  autoupdate.kubebuilder.io/v1-alpha: {}
 projectName: project
 repo: tutorial.kubebuilder.io/project
 resources:
