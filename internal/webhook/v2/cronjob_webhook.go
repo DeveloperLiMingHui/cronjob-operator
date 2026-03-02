@@ -18,11 +18,16 @@ package v2
 
 import (
 	"context"
+	"strings"
 
+	"github.com/robfig/cron"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	validationutils "k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
 	batchv2 "tutorial.kubebuilder.io/project/api/v2"
 )
 
@@ -34,7 +39,12 @@ var cronjoblog = logf.Log.WithName("cronjob-resource")
 func SetupCronJobWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &batchv2.CronJob{}).
 		WithValidator(&CronJobCustomValidator{}).
-		WithDefaulter(&CronJobCustomDefaulter{}).
+		WithDefaulter(&CronJobCustomDefaulter{
+			DefaultConcurrencyPolicy:          batchv2.AllowConcurrent,
+			DefaultSuspend:                    false,
+			DefaultSuccessfulJobsHistoryLimit: 3,
+			DefaultFailedJobsHistoryLimit:     1,
+		}).
 		Complete()
 }
 
@@ -49,6 +59,11 @@ func SetupCronJobWebhookWithManager(mgr ctrl.Manager) error {
 // as it is used only for temporary operations and does not need to be deeply copied.
 type CronJobCustomDefaulter struct {
 	// TODO(user): Add more fields as needed for defaulting
+	// Default values for various CronJob fields
+	DefaultConcurrencyPolicy          batchv2.ConcurrencyPolicy
+	DefaultSuspend                    bool
+	DefaultSuccessfulJobsHistoryLimit int32
+	DefaultFailedJobsHistoryLimit     int32
 }
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind CronJob.
@@ -56,6 +71,7 @@ func (d *CronJobCustomDefaulter) Default(_ context.Context, obj *batchv2.CronJob
 	cronjoblog.Info("Defaulting for CronJob", "name", obj.GetName())
 
 	// TODO(user): fill in your defaulting logic.
+	d.applyDefaults(obj)
 
 	return nil
 }
@@ -78,8 +94,7 @@ func (v *CronJobCustomValidator) ValidateCreate(_ context.Context, obj *batchv2.
 	cronjoblog.Info("Validation for CronJob upon creation", "name", obj.GetName())
 
 	// TODO(user): fill in your validation logic upon object creation.
-
-	return nil, nil
+	return nil, validateCronJob(obj)
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type CronJob.
@@ -87,8 +102,7 @@ func (v *CronJobCustomValidator) ValidateUpdate(_ context.Context, oldObj, newOb
 	cronjoblog.Info("Validation for CronJob upon update", "name", newObj.GetName())
 
 	// TODO(user): fill in your validation logic upon object update.
-
-	return nil, nil
+	return nil, validateCronJob(newObj)
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type CronJob.
@@ -98,4 +112,80 @@ func (v *CronJobCustomValidator) ValidateDelete(_ context.Context, obj *batchv2.
 	// TODO(user): fill in your validation logic upon object deletion.
 
 	return nil, nil
+}
+
+// applyDefaults applies default values to CronJob fields.
+func (d *CronJobCustomDefaulter) applyDefaults(cronJob *batchv2.CronJob) {
+	if cronJob.Spec.ConcurrencyPolicy == "" {
+		cronJob.Spec.ConcurrencyPolicy = d.DefaultConcurrencyPolicy
+	}
+	if cronJob.Spec.Suspend == nil {
+		cronJob.Spec.Suspend = new(bool)
+		*cronJob.Spec.Suspend = d.DefaultSuspend
+	}
+	if cronJob.Spec.SuccessfulJobsHistoryLimit == nil {
+		cronJob.Spec.SuccessfulJobsHistoryLimit = new(int32)
+		*cronJob.Spec.SuccessfulJobsHistoryLimit = d.DefaultSuccessfulJobsHistoryLimit
+	}
+	if cronJob.Spec.FailedJobsHistoryLimit == nil {
+		cronJob.Spec.FailedJobsHistoryLimit = new(int32)
+		*cronJob.Spec.FailedJobsHistoryLimit = d.DefaultFailedJobsHistoryLimit
+	}
+}
+
+// validateCronJob validates the fields of a CronJob object.
+func validateCronJob(cronjob *batchv2.CronJob) error {
+	var allErrs field.ErrorList
+	if err := validateCronJobName(cronjob); err != nil {
+		allErrs = append(allErrs, err)
+	}
+	if err := validateCronJobSpec(cronjob); err != nil {
+		allErrs = append(allErrs, err)
+	}
+	if len(allErrs) == 0 {
+		return nil
+	}
+	return apierrors.NewInvalid(schema.GroupKind{Group: "batch.tutorial.kubebuilder.io", Kind: "CronJob"}, cronjob.Name, allErrs)
+}
+
+func validateCronJobName(cronjob *batchv2.CronJob) *field.Error {
+	if len(cronjob.Name) > validationutils.DNS1035LabelMaxLength-11 {
+		return field.Invalid(field.NewPath("metadata").Child("name"), cronjob.Name, "must be no more than 52 characters")
+	}
+	return nil
+}
+
+// validateCronJobSpec validates the schedule format of the custom CronSchedule type
+func validateCronJobSpec(cronjob *batchv2.CronJob) *field.Error {
+	// Build cron expression from the parts
+	parts := []string{"*", "*", "*", "*", "*"} // default parts for minute, hour, day of month, month, day of week
+	if cronjob.Spec.Schedule.Minute != nil {
+		parts[0] = string(*cronjob.Spec.Schedule.Minute) // Directly cast CronField (which is an alias of string) to string
+	}
+	if cronjob.Spec.Schedule.Hour != nil {
+		parts[1] = string(*cronjob.Spec.Schedule.Hour)
+	}
+	if cronjob.Spec.Schedule.DayOfMonth != nil {
+		parts[2] = string(*cronjob.Spec.Schedule.DayOfMonth)
+	}
+	if cronjob.Spec.Schedule.Month != nil {
+		parts[3] = string(*cronjob.Spec.Schedule.Month)
+	}
+	if cronjob.Spec.Schedule.DayOfWeek != nil {
+		parts[4] = string(*cronjob.Spec.Schedule.DayOfWeek)
+	}
+
+	// Join parts to form the full cron expression
+	cronExpression := strings.Join(parts, " ")
+
+	return validateScheduleFormat(
+		cronExpression,
+		field.NewPath("spec").Child("schedule"))
+}
+
+func validateScheduleFormat(schedule string, fldPath *field.Path) *field.Error {
+	if _, err := cron.ParseStandard(schedule); err != nil {
+		return field.Invalid(fldPath, schedule, "invalid cron schedule format: "+err.Error())
+	}
+	return nil
 }
