@@ -124,8 +124,10 @@ type CronJobStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
-
+// +versionName=v1
+// +kubebuilder:storageversion
 // CronJob is the Schema for the cronjobs API
 type CronJob struct {
 	metav1.TypeMeta `json:",inline"`

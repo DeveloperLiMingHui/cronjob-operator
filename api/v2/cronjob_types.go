@@ -17,28 +17,111 @@ limitations under the License.
 package v2
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// represents a Cron field specifier.
+type CronField string
+
+// ConcurrencyPolicy describes how the job will be handled.
+// Only one of the following concurrent policies may be specified.
+// If none of the following policies is specified, the default one
+// is AllowConcurrent.
+// +kubebuilder:validation:Enum=Allow;Forbid;Replace
+type ConcurrencyPolicy string
+
+const (
+	// AllowConcurrent allows CronJobs to run concurrently.
+	AllowConcurrent ConcurrencyPolicy = "Allow"
+
+	// ForbidConcurrent forbids concurrent runs, skipping next run if previous
+	// hasn't finished yet.
+	ForbidConcurrent ConcurrencyPolicy = "Forbid"
+
+	// ReplaceConcurrent cancels currently running job and replaces it with a new one.
+	ReplaceConcurrent ConcurrencyPolicy = "Replace"
+)
+
+// describes a Cron schedule.
+type CronSchedule struct {
+	// minute specifies the minutes during which the job executes.
+	// +optional
+	Minute *CronField `json:"minute,omitempty"`
+	// hour specifies the hour during which the job executes.
+	// +optional
+	Hour *CronField `json:"hour,omitempty"`
+	// dayOfMonth specifies the day of the month during which the job executes.
+	// +optional
+	DayOfMonth *CronField `json:"dayOfMonth,omitempty"`
+	// month specifies the month during which the job executes.
+	// +optional
+	Month *CronField `json:"month,omitempty"`
+	// dayOfWeek specifies the day of the week during which the job executes.
+	// +optional
+	DayOfWeek *CronField `json:"dayOfWeek,omitempty"`
+}
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // CronJobSpec defines the desired state of CronJob
 type CronJobSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of CronJob. Edit cronjob_types.go to remove/update
+	// schedule in Cron format, see https://en.wikipedia.org/wiki/Cron.
+	// +required
+	Schedule CronSchedule `json:"schedule"`
+	// startingDeadlineSeconds defines in seconds for starting the job if it misses scheduled
+	// time for any reason.  Missed jobs executions will be counted as failed ones.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
+
+	// concurrencyPolicy defines how to treat concurrent executions of a Job.
+	// Valid values are:
+	// - "Allow" (default): allows CronJobs to run concurrently;
+	// - "Forbid": forbids concurrent runs, skipping next run if previous run hasn't finished yet;
+	// - "Replace": cancels currently running job and replaces it with a new one
+	// +optional
+	// +kubebuilder:default:=Allow
+	ConcurrencyPolicy ConcurrencyPolicy `json:"concurrencyPolicy,omitempty"`
+
+	// suspend tells the controller to suspend subsequent executions, it does
+	// not apply to already started executions.  Defaults to false.
+	// +optional
+	Suspend *bool `json:"suspend,omitempty"`
+
+	// jobTemplate defines the job that will be created when executing a CronJob.
+	// +required
+	JobTemplate batchv1.JobTemplateSpec `json:"jobTemplate"`
+
+	// successfulJobsHistoryLimit defines the number of successful finished jobs to retain.
+	// This is a pointer to distinguish between explicit zero and not specified.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	SuccessfulJobsHistoryLimit *int32 `json:"successfulJobsHistoryLimit,omitempty"`
+
+	// failedJobsHistoryLimit defines the number of failed finished jobs to retain.
+	// This is a pointer to distinguish between explicit zero and not specified.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	FailedJobsHistoryLimit *int32 `json:"failedJobsHistoryLimit,omitempty"`
 }
 
 // CronJobStatus defines the observed state of CronJob.
 type CronJobStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	// active defines a list of pointers to currently running jobs.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	Active []corev1.ObjectReference `json:"active,omitempty"`
+
+	// lastScheduleTime defines the information when was the last time the job was successfully scheduled.
+	// +optional
+	LastScheduleTime *metav1.Time `json:"lastScheduleTime,omitempty"`
 
 	// For Kubernetes API conventions, see:
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
